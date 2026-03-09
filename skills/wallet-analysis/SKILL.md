@@ -11,6 +11,7 @@ Use this skill for fast, read-only wallet analysis.
 
 - wallet query: address or ENS name
 - optional chain filter when the user wants chain-specific context
+- optional position filter: `all` (default, both tokens and DeFi), `simple` (wallet tokens only), `defi` (DeFi protocol positions only)
 
 ## Workflow
 
@@ -36,6 +37,7 @@ If the environment expects commands, run:
 
 ```bash
 zerion-cli wallet analyze <wallet>
+zerion-cli wallet analyze <wallet> --positions defi
 ```
 
 Or fetch the pieces explicitly:
@@ -43,6 +45,7 @@ Or fetch the pieces explicitly:
 ```bash
 zerion-cli wallet portfolio <wallet>
 zerion-cli wallet positions <wallet>
+zerion-cli wallet positions <wallet> --positions defi
 zerion-cli wallet transactions <wallet> --limit 10
 zerion-cli wallet pnl <wallet>
 ```

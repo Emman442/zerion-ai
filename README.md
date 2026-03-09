@@ -17,7 +17,7 @@ It also ships one flagship workflow:
 
 ## 1. Get your Zerion API key
 
-Start here: [Get your API key](https://developers.zerion.io/reference/intro/authentication)
+Start here: [Get your API key](https://dashboard.zerion.io)
 
 Useful current docs:
 
@@ -85,8 +85,7 @@ Example output:
 ```json
 {
   "wallet": {
-    "query": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-    "resolvedAddress": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+    "query": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
   },
   "portfolio": {
     "total": 450000,
@@ -109,7 +108,7 @@ Example output:
 This repo uses the same public wallets across examples:
 
 - `vitalik.eth` / `0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045`
-- ENS DAO treasury / `0xFe89Cc7Abb2C4183683Ab71653c4cCd1b9cC194e0`
+- ENS DAO treasury / `0xFe89Cc7Abb2C4183683Ab71653c4cCd1b9cC194e`
 - Aave collector / `0x25F2226B597E8F9514B3F68F00F494CF4F286491`
 
 ## What ships in this repo

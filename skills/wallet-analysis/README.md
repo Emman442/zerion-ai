@@ -24,5 +24,5 @@ This skill is designed to work with either:
 
 - `vitalik.eth`
 - `0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045`
-- ENS DAO treasury / `0xFe89Cc7Abb2C4183683Ab71653c4cCd1b9cC194e0`
+- ENS DAO treasury / `0xFe89Cc7Abb2C4183683Ab71653c4cCd1b9cC194e`
 - Aave collector / `0x25F2226B597E8F9514B3F68F00F494CF4F286491`

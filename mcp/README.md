@@ -21,7 +21,7 @@ Use the CLI path when your environment expects shell commands returning JSON.
 ## Authentication
 
 1. Get a Zerion API key:
-   https://developers.zerion.io/reference/intro/authentication
+   https://dashboard.zerion.io
 2. Export it:
 
    ```bash

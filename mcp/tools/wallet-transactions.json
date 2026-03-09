@@ -10,10 +10,10 @@
       "type": "string",
       "required": true
     },
-    "page": {
+    "page[size]": {
       "type": "integer",
       "required": false,
-      "description": "Pagination size used in this repo for sampled output."
+      "description": "Number of transactions to return per page."
     },
     "filter[chain_ids]": {
       "type": "string",
@@ -30,7 +30,7 @@
     "Solana transactions do not currently support NFT transactions.",
     "This endpoint supports many filters and pagination parameters."
   ],
-  "exampleRequest": "GET https://api.zerion.io/v1/wallets/0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045/transactions/?page=10",
+  "exampleRequest": "GET https://api.zerion.io/v1/wallets/0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045/transactions/?page[size]=10",
   "exampleResponseNotes": [
     "Used for recent wallet activity summaries in the skill and CLI."
   ],

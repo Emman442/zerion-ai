@@ -1,24 +1,10 @@
 #!/usr/bin/env node
 
-const API_BASE = process.env.ZERION_API_BASE || "https://api.zerion.io/v1";
-const API_KEY = process.env.ZERION_API_KEY || "";
+import { parseFlags, basicAuthHeader, validateChain, validatePositions, resolvePositionFilter, summarizeAnalyze, CHAIN_IDS, POSITION_FILTERS } from "./lib.mjs";
 
-const CHAIN_IDS = new Set([
-  "ethereum",
-  "base",
-  "arbitrum",
-  "optimism",
-  "polygon",
-  "bsc",
-  "avalanche",
-  "gnosis",
-  "scroll",
-  "linea",
-  "zksync",
-  "solana",
-  "zora",
-  "blast"
-]);
+const API_BASE = (process.env.ZERION_API_BASE || "https://api.zerion.io/v1").replace(/\/+$/, "");
+const DEFAULT_TX_LIMIT = 10;
+const API_KEY = process.env.ZERION_API_KEY || "";
 
 function print(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
@@ -32,45 +18,15 @@ function usage() {
   print({
     name: "zerion-cli",
     usage: [
-      "zerion-cli wallet analyze <address>",
+      "zerion-cli wallet analyze <address> [--positions all|simple|defi]",
       "zerion-cli wallet portfolio <address>",
-      "zerion-cli wallet positions <address> [--chain ethereum]",
-      "zerion-cli wallet transactions <address> [--limit 25] [--chain ethereum]",
+      "zerion-cli wallet positions <address> [--chain ethereum] [--positions all|simple|defi]",
+      "zerion-cli wallet transactions <address> [--limit 10] [--chain ethereum]",
       "zerion-cli wallet pnl <address>",
       "zerion-cli chains list"
     ],
     env: ["ZERION_API_KEY", "ZERION_API_BASE (optional)"]
   });
-}
-
-function parseFlags(argv) {
-  const flags = {};
-  const rest = [];
-
-  for (let i = 0; i < argv.length; i += 1) {
-    const token = argv[i];
-    if (!token.startsWith("--")) {
-      rest.push(token);
-      continue;
-    }
-
-    const [rawKey, inlineValue] = token.slice(2).split("=", 2);
-    const key = rawKey.trim();
-    const nextValue = inlineValue ?? argv[i + 1];
-
-    if (inlineValue === undefined && nextValue && !nextValue.startsWith("--")) {
-      flags[key] = nextValue;
-      i += 1;
-    } else {
-      flags[key] = inlineValue ?? true;
-    }
-  }
-
-  return { rest, flags };
-}
-
-function basicAuthHeader(rawKey) {
-  return `Basic ${Buffer.from(`${rawKey}:`).toString("base64")}`;
 }
 
 function ensureKey() {
@@ -80,19 +36,23 @@ function ensureKey() {
   }
 }
 
-function validateChain(chain) {
-  if (!chain) return;
-  if (!CHAIN_IDS.has(chain)) {
-    printError("unsupported_chain", `Unsupported chain '${chain}'.`, {
-      supportedChains: Array.from(CHAIN_IDS).sort()
-    });
+function validateChainOrExit(chain) {
+  const err = validateChain(chain);
+  if (err) {
+    printError(err.code, err.message, { supportedChains: err.supportedChains });
     process.exit(1);
   }
 }
 
-async function request(pathname, params = {}) {
-  ensureKey();
+function validatePositionsOrExit(positions) {
+  const err = validatePositions(positions);
+  if (err) {
+    printError(err.code, err.message, { supportedValues: err.supportedValues });
+    process.exit(1);
+  }
+}
 
+async function fetchAPI(pathname, params = {}) {
   const url = new URL(`${API_BASE}${pathname}`);
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === "") continue;
@@ -115,28 +75,41 @@ async function request(pathname, params = {}) {
   }
 
   if (!response.ok) {
-    printError("api_error", `Zerion API request failed with status ${response.status}.`, {
-      status: response.status,
-      response: payload
-    });
-    process.exit(1);
+    const err = new Error(`Zerion API request failed with status ${response.status}.`);
+    err.status = response.status;
+    err.response = payload;
+    throw err;
   }
 
   return payload;
+}
+
+async function request(pathname, params = {}) {
+  ensureKey();
+  try {
+    return await fetchAPI(pathname, params);
+  } catch (err) {
+    printError("api_error", err.message, {
+      status: err.status,
+      response: err.response
+    });
+    process.exit(1);
+  }
 }
 
 async function getPortfolio(address) {
   return request(`/wallets/${encodeURIComponent(address)}/portfolio`);
 }
 
-async function getPositions(address, chain) {
-  const params = chain ? { "filter[chain_ids]": chain } : {};
+async function getPositions(address, chain, positionFilter) {
+  const params = { "filter[positions]": resolvePositionFilter(positionFilter) };
+  if (chain) params["filter[chain_ids]"] = chain;
   return request(`/wallets/${encodeURIComponent(address)}/positions/`, params);
 }
 
 async function getTransactions(address, chain, limit) {
   const params = {
-    page: limit || 25
+    "page[size]": limit || DEFAULT_TX_LIMIT
   };
   if (chain) params["filter[chain_ids]"] = chain;
   return request(`/wallets/${encodeURIComponent(address)}/transactions/`, params);
@@ -148,35 +121,6 @@ async function getPnl(address) {
 
 async function listChains() {
   return request("/chains/");
-}
-
-function summarizeAnalyze(address, portfolio, positions, transactions, pnl) {
-  return {
-    wallet: {
-      query: address,
-      resolvedAddress: address
-    },
-    portfolio: {
-      total: portfolio?.data?.attributes?.total?.positions ?? null,
-      currency: "usd"
-    },
-    positions: {
-      count: Array.isArray(positions?.data) ? positions.data.length : 0
-    },
-    transactions: {
-      sampled: Array.isArray(transactions?.data) ? transactions.data.length : 0
-    },
-    pnl: {
-      available: Boolean(pnl?.data),
-      summary: pnl?.data?.attributes ?? null
-    },
-    raw: {
-      portfolio,
-      positions,
-      transactions,
-      pnl
-    }
-  };
 }
 
 async function main() {
@@ -204,14 +148,15 @@ async function main() {
     process.exit(1);
   }
 
-  validateChain(flags.chain);
+  validateChainOrExit(flags.chain);
+  validatePositionsOrExit(flags.positions);
 
   switch (action) {
     case "portfolio":
       print(await getPortfolio(target));
       return;
     case "positions":
-      print(await getPositions(target, flags.chain));
+      print(await getPositions(target, flags.chain, flags.positions));
       return;
     case "transactions":
       print(await getTransactions(target, flags.chain, flags.limit));
@@ -220,13 +165,26 @@ async function main() {
       print(await getPnl(target));
       return;
     case "analyze": {
-      const [portfolio, positions, transactions, pnl] = await Promise.all([
-        getPortfolio(target),
-        getPositions(target, flags.chain),
-        getTransactions(target, flags.chain, flags.limit || 10),
-        getPnl(target)
+      ensureKey();
+      const addr = encodeURIComponent(target);
+      const txParams = { "page[size]": flags.limit || DEFAULT_TX_LIMIT };
+      const posParams = { "filter[positions]": resolvePositionFilter(flags.positions) };
+      if (flags.chain) posParams["filter[chain_ids]"] = flags.chain;
+      if (flags.chain) txParams["filter[chain_ids]"] = flags.chain;
+      const results = await Promise.allSettled([
+        fetchAPI(`/wallets/${addr}/portfolio`),
+        fetchAPI(`/wallets/${addr}/positions/`, posParams),
+        fetchAPI(`/wallets/${addr}/transactions/`, txParams),
+        fetchAPI(`/wallets/${addr}/pnl`)
       ]);
-      print(summarizeAnalyze(target, portfolio, positions, transactions, pnl));
+      const labels = ["portfolio", "positions", "transactions", "pnl"];
+      const values = results.map((r) => r.status === "fulfilled" ? r.value : null);
+      const failures = results
+        .map((r, i) => r.status === "rejected" ? labels[i] : null)
+        .filter(Boolean);
+      const summary = summarizeAnalyze(target, ...values);
+      if (failures.length) summary.failures = failures;
+      print(summary);
       return;
     }
     default:

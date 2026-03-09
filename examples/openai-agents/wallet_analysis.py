@@ -9,6 +9,7 @@
 import asyncio
 import base64
 import os
+from urllib.parse import quote
 
 import httpx
 from agents import Agent, Runner, function_tool
@@ -34,22 +35,22 @@ async def _get(path: str) -> dict:
 
 @function_tool
 async def wallet_portfolio(address: str) -> dict:
-    return await _get(f"/wallets/{address}/portfolio")
+    return await _get(f"/wallets/{quote(address, safe='')}/portfolio")
 
 
 @function_tool
-async def wallet_positions(address: str) -> dict:
-    return await _get(f"/wallets/{address}/positions/")
+async def wallet_positions(address: str, position_filter: str = "no_filter") -> dict:
+    return await _get(f"/wallets/{quote(address, safe='')}/positions/?filter[positions]={quote(position_filter, safe='')}")
 
 
 @function_tool
 async def wallet_transactions(address: str) -> dict:
-    return await _get(f"/wallets/{address}/transactions/?page=10")
+    return await _get(f"/wallets/{quote(address, safe='')}/transactions/?page[size]=10")
 
 
 @function_tool
 async def wallet_pnl(address: str) -> dict:
-    return await _get(f"/wallets/{address}/pnl")
+    return await _get(f"/wallets/{quote(address, safe='')}/pnl")
 
 
 async def main() -> None:

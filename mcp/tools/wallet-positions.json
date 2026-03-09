@@ -10,6 +10,12 @@
       "type": "string",
       "required": true
     },
+    "filter[positions]": {
+      "type": "string",
+      "required": false,
+      "enum": ["only_simple", "only_complex", "no_filter"],
+      "description": "Position filter: only_simple (wallet tokens only), only_complex (DeFi only), or no_filter (both). Defaults to no_filter when omitted."
+    },
     "filter[chain_ids]": {
       "type": "string",
       "required": false,
