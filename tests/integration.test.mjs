@@ -11,7 +11,7 @@ const API_KEY = process.env.ZERION_API_KEY || "";
 const SKIP = !API_KEY;
 const SKIP_MSG = "Skipping: ZERION_API_KEY not set";
 
-const VITALIK = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
+const VITALIK = "0x42b9dF65B219B3dD36FF330A4dD8f327A6Ada990";
 
 function run(args) {
   return new Promise((resolve) => {

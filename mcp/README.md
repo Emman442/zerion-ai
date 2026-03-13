@@ -20,6 +20,10 @@ Use the CLI path when your environment expects shell commands returning JSON.
 
 ## Authentication
 
+Two options:
+
+### Option 1: API Key
+
 1. Get a Zerion API key:
    https://dashboard.zerion.io
 2. Export it:
@@ -31,6 +35,17 @@ Use the CLI path when your environment expects shell commands returning JSON.
 3. Reuse it in the MCP client config.
 
 This repo's example configs assume an `Authorization: Bearer ...` header for the hosted MCP and standard Basic Auth for raw REST requests.
+
+### Option 2: x402 Pay-per-call
+
+No API key needed. Pay $0.01 USDC per request on Base via the [x402 protocol](https://www.x402.org/).
+
+```bash
+export WALLET_PRIVATE_KEY="0x..."   # EVM wallet with USDC on Base
+export ZERION_X402=true
+```
+
+The CLI signs the payment automatically using `@x402/fetch` and `@x402/evm`. Your wallet must hold USDC on Base.
 
 ## Supported clients in this repo
 

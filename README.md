@@ -15,20 +15,47 @@ It also ships one flagship workflow:
 
 ![Wallet analysis demo](./assets/demo-wallet-analysis.svg)
 
-## 1. Get your Zerion API key
+## 1. Choose your authentication method
 
-Start here: [Get your API key](https://dashboard.zerion.io)
+### Option A: API Key
 
-Useful current docs:
+Get an API key and export it: [Get your API key](https://dashboard.zerion.io)
 
-- [Build with AI](https://developers.zerion.io/reference/building-with-ai)
-- [Get Wallet Data With Zerion API](https://developers.zerion.io/reference/getting-started)
-
-As of March 8, 2026, Zerion's public authentication docs describe:
+```bash
+export ZERION_API_KEY="zk_dev_..."
+```
 
 - API auth via **HTTP Basic Auth**
 - dev keys beginning with `zk_dev_`
 - current dev-key limits of **120 requests/minute** and **5k requests/day**
+
+Useful docs:
+
+- [Build with AI](https://developers.zerion.io/reference/building-with-ai)
+- [Get Wallet Data With Zerion API](https://developers.zerion.io/reference/getting-started)
+
+### Option B: x402 Pay-per-call
+
+**No API key needed.** Pay $0.01 USDC per request on Base via the [x402 protocol](https://www.x402.org/). The CLI handles the payment handshake automatically using your wallet's private key.
+
+Setup:
+
+```bash
+export WALLET_PRIVATE_KEY="0x..."   # EVM wallet with USDC on Base
+```
+
+Then use the `--x402` flag:
+
+```bash
+zerion-cli wallet analyze 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 --x402
+```
+
+Or enable x402 globally:
+
+```bash
+export ZERION_X402=true
+zerion-cli wallet analyze 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+```
 
 ## 2. Choose your integration path
 
@@ -76,10 +103,20 @@ Start here:
 
 ### CLI quickstart
 
+**With API key:**
+
 ```bash
 npm install -g zerion-cli
 export ZERION_API_KEY="zk_dev_..."
 zerion-cli wallet analyze 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+```
+
+**With x402 (no API key needed):**
+
+```bash
+npm install -g zerion-cli
+export WALLET_PRIVATE_KEY="0x..."
+zerion-cli wallet analyze 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 --x402
 ```
 
 Example output:
