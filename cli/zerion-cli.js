@@ -7,24 +7,79 @@ const DEFAULT_TX_LIMIT = 10;
 const API_KEY = process.env.ZERION_API_KEY || "";
 const USE_X402 = process.env.ZERION_X402 === "true";
 const WALLET_PRIVATE_KEY = process.env.WALLET_PRIVATE_KEY || "";
+const EVM_PRIVATE_KEY = process.env.EVM_PRIVATE_KEY || "";
+const SOLANA_PRIVATE_KEY = process.env.SOLANA_PRIVATE_KEY || "";
+const PREFER_SOLANA = process.env.ZERION_X402_PREFER_SOLANA === "true";
 
 let debug = false;
 function debugLog(...args) {
   if (debug) process.stderr.write(`[debug] ${args.join(" ")}\n`);
 }
 
+function isEvmKey(key) {
+  return key.startsWith("0x");
+}
+
+const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]+$/;
+// Solana keypairs are 64 bytes; base58-encoded they are 87-88 characters
+function isSolanaKey(key) {
+  return !key.startsWith("0x") && BASE58_RE.test(key) && key.length >= 80;
+}
+
+const HAS_SOLANA_KEY = !!(SOLANA_PRIVATE_KEY || isSolanaKey(WALLET_PRIVATE_KEY));
+
 let _x402Fetch = null;
 async function getX402Fetch() {
   if (_x402Fetch) return _x402Fetch;
-  if (!WALLET_PRIVATE_KEY) {
-    throw new Error("WALLET_PRIVATE_KEY is required for x402 mode. Set it as an environment variable.");
+
+  // Resolve keys: dedicated vars take precedence, fall back to WALLET_PRIVATE_KEY
+  const evmKey = EVM_PRIVATE_KEY || (isEvmKey(WALLET_PRIVATE_KEY) ? WALLET_PRIVATE_KEY : "");
+  const solKey = SOLANA_PRIVATE_KEY || (isSolanaKey(WALLET_PRIVATE_KEY) ? WALLET_PRIVATE_KEY : "");
+
+  if (!evmKey && !solKey) {
+    throw new Error(
+      "No valid private key found for x402 mode. Set WALLET_PRIVATE_KEY (0x-hex for EVM, base58 for Solana), " +
+      "or set EVM_PRIVATE_KEY and/or SOLANA_PRIVATE_KEY."
+    );
   }
+
+  if (EVM_PRIVATE_KEY && !isEvmKey(EVM_PRIVATE_KEY)) {
+    throw new Error("EVM_PRIVATE_KEY must be a 0x-prefixed hex string.");
+  }
+
   const { wrapFetchWithPayment, x402Client } = await import("@x402/fetch");
-  const { registerExactEvmScheme } = await import("@x402/evm/exact/client");
-  const { privateKeyToAccount } = await import("viem/accounts");
-  const signer = privateKeyToAccount(WALLET_PRIVATE_KEY);
   const client = new x402Client();
-  registerExactEvmScheme(client, { signer });
+
+  if (evmKey) {
+    const { registerExactEvmScheme } = await import("@x402/evm/exact/client");
+    const { privateKeyToAccount } = await import("viem/accounts");
+    const signer = privateKeyToAccount(evmKey);
+    registerExactEvmScheme(client, { signer });
+    debugLog("x402 registered: EVM (Base)");
+  }
+
+  if (solKey) {
+    const { registerExactSvmScheme } = await import("@x402/svm/exact/client");
+    const { createKeyPairSignerFromBytes, getBase58Codec } = await import("@solana/kit");
+    const keyBytes = getBase58Codec().encode(solKey);
+    const signer = await createKeyPairSignerFromBytes(keyBytes);
+    registerExactSvmScheme(client, { signer });
+    debugLog(`x402 registered: Solana (${signer.address})`);
+  }
+
+  if (PREFER_SOLANA && !(evmKey && solKey)) {
+    debugLog("x402 warning: ZERION_X402_PREFER_SOLANA=true has no effect unless both EVM and Solana keys are set");
+  }
+
+  if (evmKey && solKey && PREFER_SOLANA) {
+    client.registerPolicy((version, reqs) => {
+      const sol = reqs.filter(r => r.network.startsWith("solana:"));
+      const others = reqs.filter(r => !r.network.startsWith("solana:"));
+      return [...sol, ...others];
+    });
+    debugLog("x402 policy: prefer Solana");
+  }
+
   _x402Fetch = wrapFetchWithPayment(fetch, client);
   return _x402Fetch;
 }
@@ -48,9 +103,9 @@ function usage() {
       "zerion-cli wallet pnl <address> [--x402]",
       "zerion-cli chains list [--x402]"
     ],
-    env: ["ZERION_API_KEY", "ZERION_API_BASE (optional)", "ZERION_X402=true (use x402 pay-per-call)", "WALLET_PRIVATE_KEY (required for x402)"],
+    env: ["ZERION_API_KEY", "ZERION_API_BASE (optional)", "ZERION_X402=true (use x402 pay-per-call)", "WALLET_PRIVATE_KEY (x402: single key, auto-detected format)", "EVM_PRIVATE_KEY (x402: 0x-hex EVM key, overrides WALLET_PRIVATE_KEY for EVM)", "SOLANA_PRIVATE_KEY (x402: base58 Solana key, overrides WALLET_PRIVATE_KEY for Solana)", "ZERION_X402_PREFER_SOLANA=true (prefer Solana when both keys are set)"],
     x402: {
-      description: "Pay $0.01 USDC per request on Base. No API key required.",
+      description: "Pay $0.01 USDC per request. EVM (Base) or Solana supported — auto-detected from key format.",
       docs: "https://developers.zerion.io/reference/x402"
     }
   });
@@ -98,7 +153,13 @@ async function fetchAPI(pathname, params = {}, useX402 = false) {
   debugLog(`${useX402 ? "x402" : "api"} GET ${url}`);
 
   const fetchFn = useX402 ? await getX402Fetch() : fetch;
-  const response = await fetchFn(url, { headers });
+  let response = await fetchFn(url, { headers });
+
+  // Retry on 402 only for Solana — facilitator fee-payer rotation can cause transient failures
+  for (let attempt = 1; useX402 && HAS_SOLANA_KEY && response.status === 402 && attempt <= 2; attempt++) {
+    debugLog(`x402 payment failed, retry ${attempt}/2...`);
+    response = await fetchFn(url, { headers });
+  }
 
   debugLog(`response ${response.status} ${url}`);
 
