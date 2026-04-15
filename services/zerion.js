@@ -3,6 +3,19 @@ import { promisify } from "util";
 
 const execAsync = promisify(exec);
 
+function runCommand(command) {
+  return new Promise((resolve, reject) => {
+    exec(command, (error, stdout, stderr) => {
+      if (error) return reject(error);
+      try {
+        resolve(JSON.parse(stdout));
+      } catch {
+        resolve(stdout);
+      }
+    });
+  });
+}
+
 export async function getPortfolio(address) {
   try {
     const { stdout } = await execAsync(
@@ -38,4 +51,16 @@ export function getTopPositions(rawData, limit = 10) {
     });
 }
 
+
+export async function executeSwap({ from, to, amount, chain }) {
+  const command = `
+    npx zerion-cli wallet swap \
+    --from ${from} \
+    --to ${to} \
+    --amount ${amount} \
+    --chain ${chain}
+  `;
+
+  return await runCommand(command);
+}
 

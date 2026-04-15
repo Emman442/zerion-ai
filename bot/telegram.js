@@ -1,12 +1,12 @@
 import TelegramBot from "node-telegram-bot-api";
 import { getPortfolio, getTopPositions } from "../services/zerion.js";
+import { evaluatePortfolio } from "../utils/engine.js";
 
 const token = process.env.TELEGRAM_TOKEN || "8600988454:AAFw7IwkGGw-wzaGjdxMD9k3GXwG-WPygpM";
 if (!token) throw new Error("TELEGRAM_TOKEN is required in .env");
 
 const bot = new TelegramBot(token, { polling: true });
 
-// Main Menu with Inline Keyboard
 function sendMainMenu(chatId) {
   const opts = {
     reply_markup: {
@@ -26,7 +26,6 @@ function sendMainMenu(chatId) {
   });
 }
 
-// Start Command
 bot.onText(/\/start/, (msg) => {
   sendMainMenu(msg.chat.id);
 });
@@ -104,6 +103,22 @@ bot.on("callback_query", async (callbackQuery) => {
         sendMainMenu(chatId);
         break;
 
+      case "protection_mode":
+        await handleProtectionMode(chatId);
+        break;
+
+      case "toggle_protection":
+        await toggleProtectionMode(chatId);
+        break;
+
+      case "run_agent":
+        await runAgent(chatId);
+        break;
+
+      case "execute_fix":
+        await executeFix(chatId);
+        break;
+
       default:
         // Keep your other cases (run_agent, protection_mode, etc.)
         if (data === "run_agent" || data === "protection_mode" || data === "activity_log") {
@@ -164,8 +179,6 @@ async function handlePortfolio(chatId) {
     await bot.sendMessage(chatId, `❌ Error loading portfolio:\n${error.message}`);
   }
 }
-
-
 // Get policies from DB
 function getCurrentPolicies(chatId) {
   const stmt = global.db.prepare(`
@@ -176,7 +189,6 @@ function getCurrentPolicies(chatId) {
   `);
   return stmt.all(chatId);
 }
-
 // Save a new policy
 function addPolicy(chatId, type, value, description) {
   // Ensure user exists first
@@ -191,8 +203,6 @@ function addPolicy(chatId, type, value, description) {
   `);
   stmt.run(chatId, type, value, description);
 }
-
-// Handle Policies Menu
 // Handle Policies Menu
 async function handlePolicies(chatId) {
   const policies = getCurrentPolicies(chatId);
@@ -226,7 +236,6 @@ async function handlePolicies(chatId) {
 
   await bot.sendMessage(chatId, text, opts);
 }
-
 // Add Policy Flow
 async function handleAddPolicy(chatId) {
   await bot.sendMessage(chatId, "➕ **Choose Policy Type**:", {
@@ -242,34 +251,134 @@ async function handleAddPolicy(chatId) {
     }
   });
 }
+// ====================== PROTECTION MODE ======================
+async function handleProtectionMode(chatId) {
+  // Get current status from DB
+  let user = global.db.prepare("SELECT protection_mode FROM users WHERE chat_id = ?")
+    .get(chatId);
+
+  if (!user) {
+    // Create user record if not exists
+    global.db.prepare("INSERT OR IGNORE INTO users (chat_id) VALUES (?)").run(chatId);
+    user = { protection_mode: 0 };
+  }
+
+  const isOn = user.protection_mode === 1;
+
+  const text = `🛡️ **Protection Mode**\n\n` +
+    `Status: **${isOn ? 'ON' : 'OFF'}**\n\n` +
+    (isOn
+      ? "Emergency protection is active.\nIf portfolio drops significantly, Sentinel will automatically move to stablecoins (within your policies)."
+      : "Protection is disabled. Agent will only suggest actions.");
+
+  const opts = {
+    parse_mode: "Markdown",
+    reply_markup: {
+      inline_keyboard: [
+        [{
+          text: isOn ? "🔴 Turn OFF" : "🟢 Turn ON",
+          callback_data: "toggle_protection"
+        }],
+        [{ text: "🔙 Back to Menu", callback_data: "main_menu" }]
+      ]
+    }
+  };
+
+  await bot.sendMessage(chatId, text, opts);
+}
+// Toggle Protection Mode
+async function toggleProtectionMode(chatId) {
+  // Ensure user exists
+  global.db.prepare("INSERT OR IGNORE INTO users (chat_id) VALUES (?)").run(chatId);
+
+  // Toggle the value
+  global.db.prepare(`
+    UPDATE users 
+    SET protection_mode = 1 - protection_mode 
+    WHERE chat_id = ?
+  `).run(chatId);
+
+  await bot.sendMessage(chatId, "✅ Protection Mode updated successfully!");
+  await handleProtectionMode(chatId);   // Refresh the screen
+}
+async function runAgent(chatId) {
+  // const address = "0x9dCFF04fafC8e7cAC8c0A70DB61f2E33166dDFB6";
+  const address = "0x4d224452801ACEd8B2F0aebE155379bb5D594381";
+
+  await bot.sendMessage(chatId, "🤖 Running Sentinel Agent...");
+
+  try {
+    const portfolio = await getPortfolio(address);
+    console.log("Portfolio fetched for agent:",portfolio);
+    const policies = getCurrentPolicies(chatId);
+
+    const actions = evaluatePortfolio(portfolio, policies);
+
+    if (actions.length === 0) {
+      await bot.sendMessage(chatId, "✅ No policy violations. Portfolio is healthy.");
+      return;
+    }
+
+    // Show first violation (keep demo simple)
+    const action = actions[0];
+
+    const message = `
+🚨 *Policy Violation Detected*
+
+Asset: *${action.asset}*
+Current: ${action.current}%
+Limit: ${action.limit}%
+
+💡 Suggested Action:
+${action.suggestion}
+`;
+
+    await bot.sendMessage(chatId, message, {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "⚡ Execute Fix", callback_data: "execute_fix" }],
+          [{ text: "❌ Ignore", callback_data: "main_menu" }]
+        ]
+      }
+    });
+
+  } catch (err) {
+    console.error(err);
+    await bot.sendMessage(chatId, "❌ Agent failed to run.");
+  }
+}
 
 
+async function executeFix(chatId) {
+  await bot.sendMessage(chatId, "🚀 Executing rebalance...");
 
+  // For now: FAKE execution (demo)
+  await bot.sendMessage(chatId, `
+✅ Swap executed
+
+ETH → USDC
+Amount: $1.20
+  `);
+
+}
+
+function logActivity(chatId, action, details) {
+  global.db.prepare(`
+    INSERT INTO activity_log (chat_id, action, details)
+    VALUES (?, ?, ?)
+  `).run(chatId, action, details);
+}
 function escapeMarkdownV2(text) {
   if (!text) return "";
   return text
     .replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&');   // Escape all special MarkdownV2 chars
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // Add this helper at the top of bot.js (or in a utils file)
 function encodeChartConfig(config) {
   return encodeURIComponent(JSON.stringify(config));
 }
-
 // Improved chart function
 async function sendSimplePieChart(chatId, positions) {
   if (positions.length < 2) {
@@ -320,20 +429,5 @@ async function sendSimplePieChart(chatId, positions) {
     await bot.sendMessage(chatId, "📊 Could not generate chart right now (too many tokens).");
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 export default bot;
