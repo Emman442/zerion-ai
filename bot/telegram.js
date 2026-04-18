@@ -102,6 +102,13 @@ bot.on("callback_query", async (callbackQuery) => {
       case "main_menu":
         sendMainMenu(chatId);
         break;
+      case "auto_mode":
+        await handleAutoMode(chatId);
+        break;
+
+      case "toggle_auto":
+        await toggleAutoMode(chatId);
+        break;
 
       case "protection_mode":
         await handleProtectionMode(chatId);
@@ -116,7 +123,13 @@ bot.on("callback_query", async (callbackQuery) => {
         break;
 
       case "execute_fix":
-        await executeFix(chatId);
+      case data.startsWith("execute_fix"):
+        const [, asset, limit] = data.split(":");
+
+        await executeFix(chatId, {
+          asset,
+          limit
+        });
         break;
 
       default:
@@ -133,9 +146,7 @@ bot.on("callback_query", async (callbackQuery) => {
 
 // Portfolio Handler (with better formatting)
 async function handlePortfolio(chatId) {
-  //   const address = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e"; // TODO: make dynamic later
-  const address = "0x9dCFF04fafC8e7cAC8c0A70DB61f2E33166dDFB6"; // TODO: make dynamic later
-
+  const address = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045"; /// TODO: make dynamic later
   try {
     const rawData = await getPortfolio(address);
 
@@ -147,7 +158,7 @@ async function handlePortfolio(chatId) {
       totalValueStr = `$${Number(rawData.portfolio.total).toLocaleString()}`;
     }
 
-    const topPositions = getTopPositions(rawData, 10);
+        const topPositions = getTopPositions(rawData, 10);
 
     let message = `💼 **Sentinel Portfolio Overview**\n\n`;
     message += `**Wallet**: \`${address.slice(0, 8)}...${address.slice(-6)}\`\n`;
@@ -155,17 +166,16 @@ async function handlePortfolio(chatId) {
     message += `**Estimated Value**: ${totalValueStr}\n\n`;
 
     if (topPositions.length > 0) {
-      message += `**Top Holdings** (showing first ${topPositions.length})\n\n`;
-
+      message += `**Top Holdings**\n\n`;
       topPositions.forEach((pos, i) => {
-        const valueStr = pos.valueUsd !== null
-          ? ` ≈ $${pos.valueUsd.toLocaleString()}`
-          : " (no USD value)";
+        const valueStr = pos.valueUsd 
+          ? ` ≈ $${pos.valueUsd.toLocaleString()}` 
+          : " (value not available)";
 
         message += `${i + 1}. **${pos.symbol}** — ${pos.quantity.toLocaleString()} ${pos.name}${valueStr}\n`;
       });
     } else {
-      message += "⚠️ No positions found or all have zero value.\n";
+      message += "⚠️ No positions with positive balance found.\n";
     }
 
     await bot.sendMessage(chatId, message, { parse_mode: "Markdown" });
@@ -301,66 +311,133 @@ async function toggleProtectionMode(chatId) {
   await bot.sendMessage(chatId, "✅ Protection Mode updated successfully!");
   await handleProtectionMode(chatId);   // Refresh the screen
 }
-async function runAgent(chatId) {
-  // const address = "0x9dCFF04fafC8e7cAC8c0A70DB61f2E33166dDFB6";
-  const address = "0x4d224452801ACEd8B2F0aebE155379bb5D594381";
+async function runAgent(chatId, { auto = false } = {}) {
+  const address = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045";
 
-  await bot.sendMessage(chatId, "🤖 Running Sentinel Agent...");
+  if (!auto) {
+    await bot.sendMessage(chatId, "🤖 Running Sentinel Agent...");
+  }
 
   try {
     const portfolio = await getPortfolio(address);
-    console.log("Portfolio fetched for agent:",portfolio);
     const policies = getCurrentPolicies(chatId);
-
     const actions = evaluatePortfolio(portfolio, policies);
 
     if (actions.length === 0) {
-      await bot.sendMessage(chatId, "✅ No policy violations. Portfolio is healthy.");
+      if (!auto) {
+        await bot.sendMessage(chatId, "✅ No policy violations.");
+      }
       return;
     }
 
-    // Show first violation (keep demo simple)
-    const action = actions[0];
+    const protectionOn = isProtectionEnabled(chatId);
 
-    const message = `
-🚨 *Policy Violation Detected*
+    for (const action of actions) {
+
+      // 🔥 AUTO MODE LOGIC
+      if (auto) {
+        if (protectionOn) {
+          // EXECUTE automatically
+          await executeFix(chatId, action, true);
+
+        } else {
+          // ONLY notify
+          await bot.sendMessage(chatId, `
+⚠️ Auto-Agent Alert
+
+${action.asset} exceeds limit.
+
+Protection Mode is OFF → No action taken.
+`);
+        }
+
+      } else {
+        // 👇 MANUAL MODE (your UI)
+        await bot.sendMessage(chatId, `
+🚨 *Policy Violation*
 
 Asset: *${action.asset}*
 Current: ${action.current}%
 Limit: ${action.limit}%
 
-💡 Suggested Action:
-${action.suggestion}
-`;
-
-    await bot.sendMessage(chatId, message, {
-      parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "⚡ Execute Fix", callback_data: "execute_fix" }],
-          [{ text: "❌ Ignore", callback_data: "main_menu" }]
-        ]
+💡 ${action.suggestion}
+`, {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "⚡ Execute Fix", callback_data: `execute_fix:${action.asset}:${action.limit}` }],
+              [{ text: "❌ Ignore", callback_data: "main_menu" }]
+            ]
+          }
+        });
       }
-    });
+    }
 
   } catch (err) {
     console.error(err);
-    await bot.sendMessage(chatId, "❌ Agent failed to run.");
+    if (!auto) {
+      await bot.sendMessage(chatId, "❌ Agent failed.");
+    }
   }
 }
 
 
-async function executeFix(chatId) {
-  await bot.sendMessage(chatId, "🚀 Executing rebalance...");
+async function executeFix(chatId, action, isAuto = false) {
+  if (!isAuto) {
+    await bot.sendMessage(chatId, "🚀 Executing rebalance...");
+  }
 
-  // For now: FAKE execution (demo)
+  // 🔥 Replace with real Zerion swap later
   await bot.sendMessage(chatId, `
 ✅ Swap executed
 
-ETH → USDC
-Amount: $1.20
-  `);
+${action.asset} → USDC
+Amount: $1
+`);
+}
 
+
+async function handleAutoMode(chatId) {
+  let user = global.db.prepare("SELECT auto_mode FROM users WHERE chat_id = ?").get(chatId);
+
+  if (!user) {
+    global.db.prepare("INSERT OR IGNORE INTO users (chat_id) VALUES (?)").run(chatId);
+    user = { auto_mode: 0 };
+  }
+
+  const isOn = user.auto_mode === 1;
+
+  await bot.sendMessage(chatId, `
+🤖 *Auto Mode*
+
+Status: *${isOn ? "ON" : "OFF"}*
+
+${isOn ? "Agent runs automatically." : "Agent runs only when triggered manually."}
+`, {
+    parse_mode: "Markdown",
+    reply_markup: {
+      inline_keyboard: [
+        [{
+          text: isOn ? "🔴 Turn OFF" : "🟢 Turn ON",
+          callback_data: "toggle_auto"
+        }],
+        [{ text: "🔙 Back", callback_data: "main_menu" }]
+      ]
+    }
+  });
+}
+
+async function toggleAutoMode(chatId) {
+  global.db.prepare("INSERT OR IGNORE INTO users (chat_id) VALUES (?)").run(chatId);
+
+  global.db.prepare(`
+    UPDATE users 
+    SET auto_mode = 1 - auto_mode 
+    WHERE chat_id = ?
+  `).run(chatId);
+
+  await bot.sendMessage(chatId, "✅ Auto Mode updated!");
+  await handleAutoMode(chatId);
 }
 
 function logActivity(chatId, action, details) {
@@ -379,55 +456,91 @@ function escapeMarkdownV2(text) {
 function encodeChartConfig(config) {
   return encodeURIComponent(JSON.stringify(config));
 }
+
+function isProtectionEnabled(chatId) {
+  const user = global.db.prepare(`
+    SELECT protection_mode FROM users WHERE chat_id = ?
+  `).get(chatId);
+
+  return user?.protection_mode === 1;
+}
+
+function isAutoModeEnabled(chatId) {
+  const user = global.db.prepare(`
+    SELECT auto_mode FROM users WHERE chat_id = ?
+  `).get(chatId);
+
+  return user?.auto_mode === 1;
+}
+
 // Improved chart function
 async function sendSimplePieChart(chatId, positions) {
-  if (positions.length < 2) {
-    return; // Skip chart if too few items
+  if (positions.length < 2) return;
+
+  // Filter only positions with value
+  const validPositions = positions.filter(p => p.valueUsd && p.valueUsd > 0);
+
+  if (validPositions.length < 2) {
+    await bot.sendMessage(chatId, "📊 Not enough valued positions for chart.");
+    return;
   }
 
-  try {
-    // Build clean Chart.js config
-    const chartConfig = {
-      type: 'pie',
-      data: {
-        labels: positions.map(p => p.symbol || p.name),
-        datasets: [{
-          data: positions.map(p => Math.max(p.quantity, 0.01)), // avoid zero
-          backgroundColor: [
-            '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0',
-            '#9966FF', '#FF9F40', '#FF6384', '#C9CBCF'
-          ]
-        }]
-      },
-      options: {
-        plugins: {
-          title: {
-            display: true,
-            text: 'Top Holdings by Quantity'
-          },
-          legend: {
-            position: 'bottom'
-          }
+  const chartConfig = {
+    type: 'pie',
+    data: {
+      labels: validPositions.map(p => p.symbol),
+      datasets: [{
+        data: validPositions.map(p => p.valueUsd),
+        backgroundColor: [
+          '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0',
+          '#9966FF', '#FF9F40', '#FF6384', '#C9CBCF',
+          '#FF6B6B', '#4ECDC4'
+        ]
+      }]
+    },
+    options: {
+      plugins: {
+        title: {
+          display: true,
+          text: 'Portfolio Allocation by USD Value'
+        },
+        legend: {
+          position: 'bottom',
+          labels: { font: { size: 11 } }
         }
       }
-    };
+    }
+  };
 
-    // Properly encoded QuickChart URL
-    const encodedConfig = encodeChartConfig(chartConfig);
-    const chartUrl = `https://quickchart.io/chart?c=${encodedConfig}`;
+  const encodedConfig = encodeChartConfig(chartConfig);
+  const chartUrl = `https://quickchart.io/chart?c=${encodedConfig}`;
 
-    // Send with explicit options (more reliable than just passing string)
-    await bot.sendPhoto(chatId, chartUrl, {
-      caption: "📊 Allocation by Quantity (Top 10)",
-      parse_mode: "Markdown"
-    });
-
-    console.log("Chart sent successfully");
-  } catch (err) {
-    console.error("Chart sending failed:", err.message);
-    // Fallback: send a message instead of crashing
-    await bot.sendMessage(chatId, "📊 Could not generate chart right now (too many tokens).");
-  }
+  await bot.sendPhoto(chatId, chartUrl, {
+    caption: "📊 Allocation by USD Value (Top Holdings)",
+    parse_mode: "Markdown"
+  });
 }
+let isRunning = false;
+
+setInterval(async () => {
+  if (isRunning) return; // prevent overlap
+  isRunning = true;
+
+  try {
+    const users = global.db.prepare(`
+      SELECT chat_id FROM users WHERE auto_mode = 1
+    `).all();
+
+    for (const user of users) {
+      await runAgent(user.chat_id, { auto: true });
+    }
+
+  } catch (err) {
+    console.error("Scheduler error:", err);
+  } finally {
+    isRunning = false;
+  }
+
+}, 5 * 60 * 1000);
 
 export default bot;

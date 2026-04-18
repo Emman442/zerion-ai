@@ -28,29 +28,22 @@ export async function getPortfolio(address) {
   }
 }
 
-// Improved extractor - show positions even if value is null
+
+// services/zerion.js
 export function getTopPositions(rawData, limit = 10) {
   const top = rawData?.positions?.top || [];
 
   return top
-    .slice(0, limit)  // don't filter displayable too strictly for now
-    .map((pos) => {
-      const attr = pos?.attributes || {};
-      const fungible = attr.fungible_info || {};
-      const quantity = attr.quantity?.float || 0;
-
-      return {
-        name: fungible.name || "Unknown Token",
-        symbol: fungible.symbol || "???",
-        quantity: Number(quantity.toFixed(6)), // clean number
-        valueUsd: attr.value?.usd ?? null,
-        price: attr.price ?? 0,
-        chain: pos.relationships?.chain?.data?.id || "ethereum",
-        displayable: attr.flags?.displayable !== false
-      };
-    });
+    .slice(0, limit)
+    .map((pos) => ({
+      name: pos.name || "Unknown Token",
+      symbol: pos.symbol || "???",
+      quantity: Number(pos.quantity) || 0,
+      valueUsd: Number(pos.value) || null,
+      chain: pos.chain || "ethereum"
+    }))
+    .filter(pos => pos.quantity > 0);
 }
-
 
 export async function executeSwap({ from, to, amount, chain }) {
   const command = `
